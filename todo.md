@@ -21,3 +21,12 @@
 - [x] Add automated coverage for sign-in-gated enrollment and returning-user dashboard state
 - [x] Add automated coverage for unauthenticated enrollment gating and returning-user dashboard eligibility
 - [x] Add a pure authenticated-dashboard eligibility check and tests for unauthenticated access prevention
+- [x] Update pricing to $0.31/minute plus $1 per 30-minute block, totaling $10.30 per block
+- [x] Require successful sandbox payment confirmation before showing booking controls
+- [x] Gate booking mutations behind the completed demo payment state
+- [x] Add clear final-transaction and no-returns messaging throughout enrollment and payment
+- [x] Add admin notification view for every paid booking request with collected client and booking details
+- [x] Add tests for pricing calculation, payment gating, and admin booking notifications
+- [x] Let clients select 1–4 units before payment or require re-payment whenever the selected unit count changes
+- [x] Add automated tests for mismatched paid units versus selected units
+- [x] Add automated tests for paid booking notification creation

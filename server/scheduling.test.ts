@@ -1,9 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { canAccessDashboard, canStartEnrollment, getDemoStorageKey, hasReservationConflict, isReservationAllowed } from "../client/src/lib/scheduling";
+import { calculateReservationTotal, canAccessDashboard, canStartEnrollment, createBookingNotification, getDemoStorageKey, hasReservationConflict, isPaymentValidForUnits, isReservationAllowed } from "../client/src/lib/scheduling";
 
 describe("demo reservation rules", () => {
   const now = new Date("2026-09-06T12:00:00.000Z");
   const future = new Date("2026-09-06T14:00:00.000Z");
+
+  it("calculates $10.30 for one 30-minute block", () => {
+    expect(calculateReservationTotal(1)).toEqual({ minutes: 30, listeningCharge: 9.3, blockCharge: 1, total: 10.3 });
+  });
+
+  it("calculates the additional block fee for multiple units", () => {
+    expect(calculateReservationTotal(4).total).toBe(41.2);
+  });
+
+  it("accepts payment only when the paid units and amount match", () => {
+    const paidForTwo = { id: "DEMO-2", amount: 20.6, units: 2, paidAt: now.toISOString() };
+    expect(isPaymentValidForUnits(paidForTwo, 2)).toBe(true);
+    expect(isPaymentValidForUnits(paidForTwo, 1)).toBe(false);
+  });
+
+  it("creates an admin notification with the paid booking details", () => {
+    const notification = createBookingNotification({ clientName: "A Client", clientEmail: "client@example.com", startsAt: future.toISOString(), units: 1, amount: 10.3, paymentId: "DEMO-1" });
+    expect(notification).toMatchObject({ clientName: "A Client", units: 1, amount: 10.3, paymentId: "DEMO-1" });
+    expect(notification.id).toMatch(/^NOTICE-/);
+    expect(notification.createdAt).toBeTruthy();
+  });
 
   it("allows one to four units in the future", () => {
     expect(isReservationAllowed([], future, 1, now)).toBe(true);
