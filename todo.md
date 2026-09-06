@@ -1,0 +1,23 @@
+# Project TODO
+
+- [x] Build polished demo-only client enrollment landing and onboarding flow
+- [x] Route signed-in enrolled clients directly to their profile dashboard
+- [x] Add client profile dashboard with enrollment status and upcoming reservations
+- [x] Add clear demo-only enrollment terms and nonrefundable $9.99 one-time fee language
+- [x] Add demo enrollment confirmation/payment interaction without real payment processing
+- [x] Add 30-minute session reservation flow with 1–4 units per reservation
+- [x] Enforce one reservation of up to four 30-minute units within each rolling 12-hour period
+- [x] Show booking availability and helpful empty/error states
+- [x] Add automated/unit tests for enrollment and booking constraints
+- [x] Visually verify desktop and mobile layouts
+- [x] Require authentication before enrollment and persist enrollment state per authenticated user
+- [x] Implement a true post-enrollment dashboard transition tied to authenticated state
+- [x] Store booking creation time and enforce the rolling 12-hour rule against booking attempts
+- [x] Implement explicit availability states and conflict-aware validation
+- [x] Add enrollment-flow and future-reservation edge-case tests
+- [x] Capture and review a mobile viewport screenshot
+- [x] Sync enrollment state when authenticated user identity resolves or changes
+- [x] Add an explicit slot availability model with taken-time conflict validation
+- [x] Add automated coverage for sign-in-gated enrollment and returning-user dashboard state
+- [x] Add automated coverage for unauthenticated enrollment gating and returning-user dashboard eligibility
+- [x] Add a pure authenticated-dashboard eligibility check and tests for unauthenticated access prevention
