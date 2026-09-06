@@ -2,8 +2,6 @@ export const UNIT_MINUTES = 30;
 export const MIN_UNITS = 1;
 export const MAX_UNITS = 4;
 export const BOOKING_WINDOW_HOURS = 12;
-export const PRICE_PER_MINUTE = 0.31;
-export const BLOCK_FEE = 1;
 
 export function getDemoStorageKey(identity?: string) {
   return `empathetic-listening-demo-${identity ?? "guest"}`;
@@ -15,44 +13,6 @@ export function canStartEnrollment(isAuthenticated: boolean, acceptedTerms: bool
 
 export function canAccessDashboard(isAuthenticated: boolean, enrolled: boolean) {
   return isAuthenticated && enrolled;
-}
-
-export type DemoPayment = {
-  id: string;
-  amount: number;
-  units: number;
-  paidAt: string;
-};
-
-export type DemoBookingNotification = {
-  id: string;
-  clientName: string;
-  clientEmail: string;
-  startsAt: string;
-  units: number;
-  amount: number;
-  paymentId: string;
-  createdAt: string;
-};
-
-export function isPaymentValidForUnits(payment: DemoPayment | undefined, units: number) {
-  return Boolean(payment && payment.units === units && payment.amount === calculateReservationTotal(units).total);
-}
-
-export function createBookingNotification(input: Omit<DemoBookingNotification, "id" | "createdAt">): DemoBookingNotification {
-  return { ...input, id: `NOTICE-${Math.random().toString(36).slice(2, 8).toUpperCase()}`, createdAt: new Date().toISOString() };
-}
-
-export function calculateReservationTotal(units: number) {
-  const minutes = units * UNIT_MINUTES;
-  const listeningCharge = Number((minutes * PRICE_PER_MINUTE).toFixed(2));
-  const blockCharge = Number((units * BLOCK_FEE).toFixed(2));
-  return {
-    minutes,
-    listeningCharge,
-    blockCharge,
-    total: Number((listeningCharge + blockCharge).toFixed(2)),
-  };
 }
 
 export type DemoReservation = {
