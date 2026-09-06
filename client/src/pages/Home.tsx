@@ -9,6 +9,8 @@ import { toast } from "sonner";
 import { CalendarDays, Check, Clock3, HeartHandshake, LockKeyhole, LogOut, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { canAccessDashboard, canStartEnrollment, formatDuration, formatSessionTime, getDemoStorageKey, hasReservationConflict, isReservationAllowed, type DemoReservation } from "@/lib/scheduling";
+import NotificationCenter from "@/components/NotificationCenter";
+import { addNotification, createNotification } from "@/lib/notifications";
 
 const STORAGE_KEY = "empathetic-listening-demo";
 
@@ -46,11 +48,12 @@ function BrandMark() {
   );
 }
 
-function TopBar({ onSignOut, isAuthenticated }: { onSignOut: () => void; isAuthenticated: boolean }) {
+function TopBar({ onSignOut, isAuthenticated, notificationKey }: { onSignOut: () => void; isAuthenticated: boolean; notificationKey: string }) {
   return (
     <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-6 sm:px-8">
       <BrandMark />
       <div className="flex items-center gap-3">
+        {isAuthenticated ? <NotificationCenter storageKey={notificationKey} /> : null}
         <Badge className="hidden border-[#d8e4dd] bg-[#f0f6f1] px-3 py-1.5 text-[#3c6b5b] sm:inline-flex">Demo environment</Badge>
         {isAuthenticated ? (
           <Button variant="ghost" size="sm" onClick={onSignOut} className="text-[#6e756f] hover:bg-[#f4f1ea] hover:text-[#173d35]">
@@ -62,7 +65,7 @@ function TopBar({ onSignOut, isAuthenticated }: { onSignOut: () => void; isAuthe
   );
 }
 
-function Onboarding({ onEnrolled, onSignIn, isAuthenticated, storageKey }: { onEnrolled: () => void; onSignIn: () => void; isAuthenticated: boolean; storageKey: string }) {
+function Onboarding({ onEnrolled, onSignIn, isAuthenticated, storageKey, notificationKey }: { onEnrolled: () => void; onSignIn: () => void; isAuthenticated: boolean; storageKey: string; notificationKey: string }) {
   const [accepted, setAccepted] = useState(false);
   const [processing, setProcessing] = useState(false);
 
@@ -79,6 +82,8 @@ function Onboarding({ onEnrolled, onSignIn, isAuthenticated, storageKey }: { onE
     setProcessing(true);
     window.setTimeout(() => {
       saveDemoState({ enrolled: true, reservations: [] }, storageKey);
+      addNotification(notificationKey, createNotification({ tone: "success", title: "Enrollment payment recorded", message: "Your one-time $9.99 demo enrollment payment was recorded. Paid transactions are final." }));
+      addNotification(notificationKey, createNotification({ tone: "success", title: "Welcome to Stillpoint", message: "Your demo enrollment is active. Your private listening dashboard is ready." }));
       setProcessing(false);
       toast.success("Demo enrollment confirmed. Welcome to Stillpoint.");
       onEnrolled();
@@ -132,7 +137,7 @@ function Onboarding({ onEnrolled, onSignIn, isAuthenticated, storageKey }: { onE
   );
 }
 
-function Dashboard({ onSignOut, storageKey }: { onSignOut: () => void; storageKey: string }) {
+function Dashboard({ onSignOut, storageKey, notificationKey }: { onSignOut: () => void; storageKey: string; notificationKey: string }) {
   const [state, setState] = useState<{ enrolled: boolean; reservations: DemoReservation[] }>(() => loadDemoState(storageKey));
   const [units, setUnits] = useState(1);
   const [date, setDate] = useState(() => {
@@ -155,6 +160,7 @@ function Dashboard({ onSignOut, storageKey }: { onSignOut: () => void; storageKe
     const next = { ...state, reservations: [reservation, ...state.reservations] };
     setState(next);
     saveDemoState(next, storageKey);
+    addNotification(notificationKey, createNotification({ tone: "success", title: "Session reserved", message: `Your ${formatDuration(units)} listening session request has been recorded.` }));
     toast.success("Your listening session is reserved.");
   };
 
@@ -187,5 +193,6 @@ export default function Home() {
     setEnrolled(loadDemoState(storageKey).enrolled);
   }, [storageKey]);
   const signIn = () => startLogin();
-  return <div className="min-h-screen bg-[#f7f4ed] text-[#173d35]"><TopBar onSignOut={logout} isAuthenticated={isAuthenticated} />{canAccessDashboard(isAuthenticated, enrolled) ? <Dashboard onSignOut={logout} storageKey={storageKey} /> : <Onboarding onEnrolled={() => setEnrolled(true)} onSignIn={signIn} isAuthenticated={isAuthenticated} storageKey={storageKey} />}<footer className="mx-auto flex w-full max-w-6xl flex-col gap-2 border-t border-[#e6e0d5] px-5 py-6 text-xs leading-5 text-[#929990] sm:flex-row sm:items-center sm:justify-between sm:px-8"><span>Stillpoint · empathetic listening prototype</span><span>{user?.email ? `Signed in as ${user.email}` : "Demo access · no live payment processing"}</span></footer></div>;
+  const notificationKey = `${storageKey}-updates`;
+  return <div className="min-h-screen bg-[#f7f4ed] text-[#173d35]"><TopBar onSignOut={logout} isAuthenticated={isAuthenticated} notificationKey={notificationKey} />{canAccessDashboard(isAuthenticated, enrolled) ? <Dashboard onSignOut={logout} storageKey={storageKey} notificationKey={notificationKey} /> : <Onboarding onEnrolled={() => setEnrolled(true)} onSignIn={signIn} isAuthenticated={isAuthenticated} storageKey={storageKey} notificationKey={notificationKey} />}<footer className="mx-auto flex w-full max-w-6xl flex-col gap-2 border-t border-[#e6e0d5] px-5 py-6 text-xs leading-5 text-[#929990] sm:flex-row sm:items-center sm:justify-between sm:px-8"><span>Stillpoint · empathetic listening prototype</span><span>{user?.email ? `Signed in as ${user.email}` : "Demo access · no live payment processing"}</span></footer></div>;
 }

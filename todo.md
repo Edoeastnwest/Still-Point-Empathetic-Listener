@@ -21,3 +21,11 @@
 - [x] Add automated coverage for sign-in-gated enrollment and returning-user dashboard state
 - [x] Add automated coverage for unauthenticated enrollment gating and returning-user dashboard eligibility
 - [x] Add a pure authenticated-dashboard eligibility check and tests for unauthenticated access prevention
+- [x] Add a custom in-website notification center for client status updates
+- [x] Add unread count, dismiss, and mark-all-read interactions
+- [x] Connect notifications to enrollment, payment, and booking actions
+- [x] Add tests for notification creation and read-state behavior
+- [x] Verify notification layout on desktop and mobile
+- [x] Add a notification event for payment or enrollment payment confirmation
+- [x] Verify the notification center in an authenticated client state on desktop and mobile
+- [x] Capture final desktop and mobile verification of the authenticated notification bell state
