@@ -29,3 +29,13 @@
 - [x] Add a notification event for payment or enrollment payment confirmation
 - [x] Verify the notification center in an authenticated client state on desktop and mobile
 - [x] Capture final desktop and mobile verification of the authenticated notification bell state
+
+## Active implementation plan (2026-10-13)
+- [x] Restore the demo booking price of $0.31/minute ($9.30 per 30-minute unit) plus the $1 per-unit fee, with a payment-confirmation gate before reservation submission.
+- [x] Restore an authenticated `/admin` portal with role-gated booking inbox and actions to confirm requests or send booking updates/reminders.
+- [x] Add database tables and tRPC procedures for enrollment, reservations, notification preferences, and client notifications; remove demo business-state dependence on localStorage.
+- [x] Implement global overlap-aware slot availability and atomic booking conflict / rolling 12-hour validation on the server.
+- [x] Add client-side notification preference controls and persist read/dismiss state through the database.
+- [x] Generate and apply the additive database migration, then run typecheck, automated tests, build, and browser smoke checks.
+
+Prototype notes: booking and enrollment payments are simulated only; no live processor is connected. Email notification preferences are persisted but email delivery is not configured. Admin-issued reminders are sent on demand from `/admin` rather than scheduled automatically.
