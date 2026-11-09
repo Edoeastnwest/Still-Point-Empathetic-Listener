@@ -21,6 +21,14 @@ export function useAuth(options?: UseAuthOptions) {
     refetchOnWindowFocus: false,
   });
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("manus-runtime-user-info", JSON.stringify(meQuery.data ?? null));
+    } catch {
+      // Authentication works without the optional runtime compatibility mirror.
+    }
+  }, [meQuery.data]);
+
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => {
       utils.auth.me.setData(undefined, null);
@@ -51,10 +59,6 @@ export function useAuth(options?: UseAuthOptions) {
   }, [logoutMutation, utils]);
 
   const state = useMemo(() => {
-    localStorage.setItem(
-      "manus-runtime-user-info",
-      JSON.stringify(meQuery.data)
-    );
     return {
       user: meQuery.data ?? null,
       loading: meQuery.isLoading || logoutMutation.isPending,

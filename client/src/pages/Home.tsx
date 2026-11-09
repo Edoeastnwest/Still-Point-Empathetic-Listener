@@ -1,76 +1,230 @@
-import { useAuth } from "@/_core/hooks/useAuth";
-import { startLogin } from "@/const";
+import { useCallback, useMemo, useState } from "react";
+import { CalendarDays, Check, Clock3, HeartHandshake, LockKeyhole, LogOut, ShieldCheck, Sparkles, UsersRound, X } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import NotificationCenter from "@/components/NotificationCenter";
+import StillpointShell from "@/components/StillpointShell";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { formatDuration, formatSessionTime } from "@/lib/scheduling";
-import { CalendarDays, Check, Clock3, HeartHandshake, LockKeyhole, LogOut, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
-import { useMemo, useState } from "react";
+import { calculateBookingTotalCents, formatDuration, formatMoney, formatSessionTime, nextLocalSlot, UNIT_FEE_CENTS, UNIT_PRICE_CENTS } from "@/lib/scheduling";
+import type { RouterOutputs } from "@/lib/trpc-types";
 import { toast } from "sonner";
 
-function BrandMark() {
-  return <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#173d35] text-[#f6f1e8] shadow-[0_8px_24px_rgba(23,61,53,0.18)]"><HeartHandshake className="h-5 w-5" strokeWidth={1.8} /></div><div><p className="font-serif text-lg font-semibold leading-none tracking-tight text-[#173d35]">Stillpoint</p><p className="mt-1 text-[10px] font-medium uppercase tracking-[0.22em] text-[#8a9289]">Empathetic listening</p></div></div>;
-}
+type DashboardData = RouterOutputs["stillpoint"]["profile"]["dashboard"];
+type Reservation = DashboardData["reservations"][number];
+type HistoryFilter = "upcoming" | "past" | "all";
 
-function TopBar({ onSignOut, isAuthenticated }: { onSignOut: () => void; isAuthenticated: boolean }) {
-  return <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-6 sm:px-8"><BrandMark /><div className="flex items-center gap-3">{isAuthenticated ? <NotificationCenter /> : null}<Badge className="hidden border-[#d8e4dd] bg-[#f0f6f1] px-3 py-1.5 text-[#3c6b5b] sm:inline-flex">Demo environment</Badge>{isAuthenticated ? <><a href="/admin" className="hidden text-sm text-[#6e756f] hover:text-[#173d35] sm:inline">Admin</a><Button variant="ghost" size="sm" onClick={onSignOut} className="text-[#6e756f] hover:bg-[#f4f1ea] hover:text-[#173d35]"><LogOut className="mr-2 h-4 w-4" /> Sign out</Button></> : null}</div></header>;
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+function BrandHero() {
+  return <section aria-labelledby="welcome-heading" className="relative overflow-hidden rounded-[2rem] bg-[#173d35] px-7 py-10 text-[#f6f1e8] shadow-[0_24px_80px_rgba(23,61,53,0.18)] sm:px-12 sm:py-14">
+    <div aria-hidden="true" className="absolute -right-20 -top-20 h-64 w-64 rounded-full border border-[#8ba99b]/20" />
+    <div aria-hidden="true" className="absolute -bottom-24 -left-16 h-56 w-56 rounded-full border border-[#8ba99b]/15" />
+    <div className="relative max-w-2xl">
+      <Badge className="mb-7 border-[#7da796]/30 bg-[#31594f] text-[#e2eee6]">A quieter place to land</Badge>
+      <h1 id="welcome-heading" className="max-w-lg font-serif text-5xl leading-[0.98] tracking-tight sm:text-7xl">Make room for what you’re carrying.</h1>
+      <p className="mt-7 max-w-xl text-base leading-7 text-[#d8e5dc] sm:text-lg">Reserve a gentle, focused listening session with a trained empathetic listener. No fixing. No performing. Just a little more space to be heard.</p>
+      <div className="mt-10 grid gap-5 border-t border-[#aac1b5]/25 pt-6 text-sm text-[#d8e5dc] sm:grid-cols-2">
+        <div className="flex gap-3"><Clock3 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#c7ddcf]" /><span>30-minute sessions, reserved in private units.</span></div>
+        <div className="flex gap-3"><LockKeyhole aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[#c7ddcf]" /><span>Your profile and reservations stay yours.</span></div>
+      </div>
+    </div>
+  </section>;
 }
 
 function Onboarding({ isAuthenticated }: { isAuthenticated: boolean }) {
-  const [accepted, setAccepted] = useState(false);
   const utils = trpc.useUtils();
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const enroll = trpc.stillpoint.profile.enroll.useMutation({
-    onSuccess: async () => { await utils.stillpoint.profile.dashboard.invalidate(); toast.success("Demo enrollment confirmed. Welcome to Stillpoint."); },
-    onError: (error) => toast.error(error.message),
+    onSuccess: async ({ created }) => {
+      setIdempotencyKey(crypto.randomUUID());
+      await utils.stillpoint.profile.dashboard.invalidate();
+      await utils.stillpoint.notifications.list.invalidate();
+      toast.success(created ? "Demo enrollment is active. Your dashboard is ready." : "Your enrollment is already active.");
+    },
+    onError: (error) => toast.error(error.message || "Enrollment could not be completed. Please retry."),
   });
-  const begin = () => {
-    if (!isAuthenticated) { toast.error("Please sign in before starting demo enrollment."); startLogin(); return; }
-    if (!accepted) { toast.error("Please acknowledge the demo enrollment terms to continue."); return; }
-    enroll.mutate({ termsAccepted: true, demoPaymentConfirmed: true });
+  const beginEnrollment = () => {
+    if (!isAuthenticated) { startLogin(); return; }
+    if (!termsAccepted) { toast.error("Please acknowledge the demo enrollment terms to continue."); return; }
+    enroll.mutate({ termsAccepted: true, demoPaymentConfirmed: true, idempotencyKey });
   };
-  return <main className="mx-auto grid w-full max-w-6xl flex-1 gap-12 px-5 pb-16 pt-6 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:items-center lg:gap-20 lg:pt-12"><section className="relative overflow-hidden rounded-[2rem] bg-[#173d35] px-7 py-10 text-[#f6f1e8] shadow-[0_24px_80px_rgba(23,61,53,0.18)] sm:px-12 sm:py-14"><div className="absolute -right-20 -top-20 h-64 w-64 rounded-full border border-[#8ba99b]/20" /><div className="absolute -bottom-24 -left-16 h-56 w-56 rounded-full border border-[#8ba99b]/15" /><div className="relative max-w-xl"><Badge className="mb-8 border-[#7da796]/30 bg-[#31594f] text-[#dcebe1]">A quieter place to land</Badge><h1 className="max-w-lg font-serif text-5xl leading-[0.98] tracking-tight sm:text-7xl">Make room for what you’re carrying.</h1><p className="mt-7 max-w-md text-base leading-7 text-[#c7d8ce] sm:text-lg">Reserve a gentle, focused listening session with a trained empathetic listener. No fixing. No performing. Just a little more space to be heard.</p><div className="mt-12 grid gap-5 border-t border-[#aac1b5]/20 pt-7 text-sm text-[#c7d8ce] sm:grid-cols-2"><div className="flex gap-3"><Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-[#b8d6c5]" /><span>30-minute sessions, reserved in private units.</span></div><div className="flex gap-3"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-[#b8d6c5]" /><span>Your profile and reservations stay yours.</span></div></div></div></section><section className="max-w-md lg:justify-self-end"><div className="mb-8"><p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#9a7257]">Client enrollment</p><h2 className="mt-3 font-serif text-4xl tracking-tight text-[#173d35]">Begin gently.</h2><p className="mt-3 leading-6 text-[#68716b]">Create your demo client profile, then you’ll go straight to your private dashboard.</p></div><Card className="border-[#e8e2d7] bg-white/80 shadow-[0_20px_60px_rgba(67,73,63,0.08)] backdrop-blur"><CardHeader className="pb-4"><div className="mb-3 flex items-center justify-between"><CardTitle className="font-serif text-2xl text-[#173d35]">One-time enrollment</CardTitle><span className="font-serif text-2xl text-[#173d35]">$9.99</span></div><CardDescription className="leading-6 text-[#768078]">A sandbox payment step for this prototype. No live card is charged.</CardDescription></CardHeader><CardContent><div className="space-y-3 rounded-2xl bg-[#faf7f0] p-4 text-sm leading-6 text-[#656e67]"><div className="flex gap-3"><ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-[#4e866f]" /><p><strong className="font-semibold text-[#34483e]">Demo-only enrollment.</strong> This flow is for product exploration and verification design.</p></div><div className="flex gap-3"><Check className="mt-1 h-4 w-4 shrink-0 text-[#4e866f]" /><p>The $9.99 one-time enrollment fee is <strong className="font-semibold text-[#34483e]">nonrefundable</strong>.</p></div></div><label className="mt-6 flex cursor-pointer items-start gap-3 text-sm leading-5 text-[#68716b]"><input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} className="mt-1 h-4 w-4 accent-[#173d35]" /><span>I understand this is a demo enrollment and the one-time $9.99 fee is nonrefundable.</span></label><Button onClick={begin} disabled={enroll.isPending} className="mt-6 h-12 w-full rounded-xl bg-[#173d35] text-base text-white shadow-[0_12px_24px_rgba(23,61,53,0.18)] hover:bg-[#28574b]">{enroll.isPending ? "Confirming demo enrollment…" : "Confirm demo enrollment"}</Button>{!isAuthenticated ? <Button variant="ghost" onClick={() => startLogin()} className="mt-2 w-full text-[#68716b] hover:bg-[#f4f1ea] hover:text-[#173d35]">Sign in to continue</Button> : null}</CardContent></Card><p className="mt-5 text-center text-xs leading-5 text-[#929990]">By continuing, you’re exploring a prototype rather than purchasing a live service.</p></section></main>;
+
+  return <main id="main-content" tabIndex={-1} className="mx-auto grid w-full max-w-6xl flex-1 items-center gap-10 px-4 pb-12 pt-5 sm:px-8 sm:pb-16 sm:pt-12 lg:grid-cols-[1.08fr_0.92fr] lg:gap-16">
+    <BrandHero />
+    <section aria-labelledby="enrollment-heading" className="w-full max-w-md lg:justify-self-end">
+      <div className="mb-7"><p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#825c43]">Client enrollment</p><h2 id="enrollment-heading" className="mt-3 font-serif text-4xl tracking-tight text-[#173d35]">Begin gently.</h2><p className="mt-3 leading-6 text-[#536057]">Create your demo client profile, then go straight to your private dashboard.</p></div>
+      <Card className="border-[#e8e2d7] bg-white/90 shadow-[0_20px_60px_rgba(67,73,63,0.08)]">
+        <CardHeader className="pb-4"><div className="mb-3 flex items-center justify-between gap-3"><CardTitle className="font-serif text-2xl text-[#173d35]">One-time enrollment</CardTitle><span className="font-serif text-2xl text-[#173d35]">$9.99</span></div><CardDescription className="leading-6 text-[#536057]">Demo-only confirmation. No live card is charged or saved.</CardDescription></CardHeader>
+        <CardContent>
+          <div className="space-y-3 rounded-2xl bg-[#faf7f0] p-4 text-sm leading-6 text-[#46564d]"><div className="flex gap-3"><ShieldCheck aria-hidden="true" className="mt-1 h-4 w-4 shrink-0 text-[#3b745d]" /><p><strong className="font-semibold text-[#34483e]">Prototype only.</strong> This step records a simulated enrollment event.</p></div><div className="flex gap-3"><Check aria-hidden="true" className="mt-1 h-4 w-4 shrink-0 text-[#3b745d]" /><p>The displayed one-time $9.99 enrollment fee is marked nonrefundable for demo-flow testing; there is no live payment.</p></div></div>
+          <label className="mt-5 flex min-h-11 cursor-pointer items-start gap-3 rounded-lg text-sm leading-5 text-[#46564d]"><input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-[#173d35] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#587365]" /><span>I understand this is a demo enrollment and acknowledge the fee terms.</span></label>
+          <Button onClick={beginEnrollment} disabled={enroll.isPending} className="mt-4 min-h-12 w-full rounded-xl bg-[#173d35] text-base text-white shadow-[0_12px_24px_rgba(23,61,53,0.18)] hover:bg-[#28574b]">{enroll.isPending ? "Recording demo enrollment…" : isAuthenticated ? "Confirm demo enrollment" : "Sign in to begin"}</Button>
+          {enroll.isError ? <p role="alert" className="mt-3 text-sm text-[#8a5d46]">{enroll.error.message} The enrollment can be safely retried.</p> : null}
+        </CardContent>
+      </Card>
+      <p className="mt-4 text-center text-xs leading-5 text-[#58645b]">This prototype does not accept card details or process live payments.</p>
+    </section>
+  </main>;
 }
 
-function Dashboard() {
+function BookingCard({
+  data,
+  reservations,
+  onRefresh,
+}: {
+  data: DashboardData;
+  reservations: Reservation[];
+  onRefresh: () => Promise<unknown>;
+}) {
   const utils = trpc.useUtils();
-  const dashboard = trpc.stillpoint.profile.dashboard.useQuery();
   const [units, setUnits] = useState(1);
-  const [paidConfirmed, setPaidConfirmed] = useState(false);
-  const [date, setDate] = useState(() => { const next = new Date(Date.now() + 60 * 60 * 1000); next.setMinutes(Math.ceil(next.getMinutes() / 30) * 30, 0, 0); return new Date(next.getTime() - next.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); });
-  const selectedStart = useMemo(() => new Date(date), [date]);
-  const selectedIso = Number.isFinite(selectedStart.getTime()) ? selectedStart.toISOString() : "";
-  const timezoneOffsetMinutes = selectedStart.getTimezoneOffset();
-  const availability = trpc.stillpoint.booking.availability.useQuery({ startsAt: selectedIso || new Date(0).toISOString(), units, timezoneOffsetMinutes }, { enabled: Boolean(dashboard.data?.enrolled) && Boolean(selectedIso) });
-  const booking = trpc.stillpoint.booking.create.useMutation({
-    onSuccess: async ({ amountCents }) => { setPaidConfirmed(false); await Promise.all([utils.stillpoint.profile.dashboard.invalidate(), utils.stillpoint.notifications.list.invalidate()]); toast.success(`Session request recorded · $${(amountCents / 100).toFixed(2)} demo payment. All payments are final.`); },
-    onError: async (error) => { toast.error(error.message); await availability.refetch(); },
+  const [startLocal, setStartLocal] = useState(() => nextLocalSlot());
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [cancelReservation, setCancelReservation] = useState<Reservation | null>(null);
+  const startsAt = useMemo(() => {
+    if (!startLocal) return null;
+    const parsed = new Date(startLocal);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }, [startLocal]);
+  const startsAtIso = startsAt?.toISOString() ?? "";
+  const localStart = startLocal;
+  const amountCents = calculateBookingTotalCents(units) ?? 0;
+  const availability = trpc.stillpoint.booking.availability.useQuery({
+    startsAt: startsAtIso || new Date(0).toISOString(),
+    localStart: localStart || "1970-01-01T00:00",
+    timeZone,
+    units,
+  }, {
+    enabled: Boolean(data.enrolled && startsAt && startLocal),
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
-  const reservations = dashboard.data?.reservations ?? [];
-  const futureReservations = reservations.filter((reservation) => new Date(reservation.startsAt).getTime() > Date.now() && reservation.status !== "cancelled").sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
-  const nextReservation = futureReservations[0];
-  const latestCreatedAt = reservations.reduce<number | null>((latest, reservation) => { const created = new Date(reservation.createdAt).getTime(); return latest === null || created > latest ? created : latest; }, null);
-  const bookingLocked = latestCreatedAt !== null && Date.now() - latestCreatedAt >= 0 && Date.now() - latestCreatedAt < 12 * 60 * 60 * 1000;
-  const priceCents = units * 930;
-  const feesCents = units * 100;
-  const totalCents = priceCents + feesCents;
-  const book = () => booking.mutate({ startsAt: selectedIso, units, timezoneOffsetMinutes, demoPaymentConfirmed: true });
+  const resetConfirmation = () => {
+    setPaymentConfirmed(false);
+    setIdempotencyKey(crypto.randomUUID());
+  };
+  const booking = trpc.stillpoint.booking.create.useMutation({
+    onSuccess: async (result) => {
+      setPaymentConfirmed(false);
+      setIdempotencyKey(crypto.randomUUID());
+      await Promise.all([utils.stillpoint.profile.dashboard.invalidate(), utils.stillpoint.notifications.list.invalidate(), availability.refetch()]);
+      toast.success(result.created ? `Session request recorded · ${formatMoney(result.amountCents)} simulated demo payment.` : "Your booking request was already recorded.");
+    },
+    onError: async (error) => {
+      toast.error(error.message || "Booking could not be submitted. Your demo confirmation remains available for a safe retry.");
+      await availability.refetch();
+    },
+  });
+  const cancellation = trpc.stillpoint.booking.cancel.useMutation({
+    onSuccess: async ({ changed, deliveredInApp }) => {
+      setCancelReservation(null);
+      await Promise.all([utils.stillpoint.profile.dashboard.invalidate(), utils.stillpoint.notifications.list.invalidate(), availability.refetch()]);
+      toast.success(changed ? deliveredInApp ? "Session cancelled. A notice was added to your inbox." : "Session cancelled. In-app notices are turned off." : "This session was already cancelled.");
+    },
+    onError: (error) => toast.error(error.message || "This session could not be cancelled."),
+  });
+  const windowEnd = useMemo(() => {
+    const eligible = reservations.reduce<number | null>((latest, reservation) => {
+      const created = new Date(reservation.createdAt).getTime();
+      return latest === null || created > latest ? created : latest;
+    }, null);
+    return eligible === null ? null : eligible + 12 * 60 * 60 * 1000;
+  }, [reservations]);
+  const bookingLocked = windowEnd !== null && windowEnd > Date.now();
+  const unlockLabel = windowEnd ? new Date(windowEnd).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  const availabilityMessage = availability.isLoading
+    ? "Checking this time against all current requests…"
+    : availability.isError
+      ? "Availability could not be checked. Retry before confirming."
+      : availability.data?.withinWindow
+        ? `Your rolling 12-hour booking window is active${unlockLabel ? ` until ${unlockLabel}` : ""}.`
+        : availability.data?.timeZoneValid === false
+          ? "Choose a valid local time on the hour or half-hour."
+          : availability.data?.conflict
+            ? "This time overlaps an existing request or is in the past. Choose another slot."
+            : availability.data?.available
+              ? `Available · shown in ${timeZone}. Availability is rechecked when you submit.`
+              : "Choose a future time to check availability.";
+  const canConfirmDemoPayment = Boolean(availability.data?.available) && !availability.isFetching && !availability.isError && !bookingLocked;
+  const visibleSessions = useMemo(() => [...reservations].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()), [reservations]);
+  const upcoming = visibleSessions.filter((item) => (item.status === "requested" || item.status === "confirmed") && new Date(item.startsAt).getTime() >= Date.now());
+  const nextSession = upcoming[0];
+  const completedSessionCount = reservations.filter((item) => item.status === "completed").length;
+  const updateDate = (value: string) => { setStartLocal(value); resetConfirmation(); };
 
-  if (dashboard.isLoading) return <main className="mx-auto flex w-full max-w-6xl flex-1 items-center justify-center px-5 py-24 text-[#768078]">Opening your private dashboard…</main>;
-  if (dashboard.isError) return <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-24 text-center text-[#8a5d46]">Your dashboard could not be loaded. Please refresh and try again.</main>;
-  if (!dashboard.data?.enrolled) return <Onboarding isAuthenticated />;
+  return <>
+    <div className="grid gap-6 pt-8 lg:grid-cols-[0.78fr_1.22fr]">
+      <div className="space-y-6">
+        <Card className="border-[#e8e2d7] bg-[#173d35] text-[#f6f1e8] shadow-[0_20px_60px_rgba(23,61,53,0.14)]"><CardContent className="p-6 sm:p-7"><div className="flex items-start justify-between"><div><p className="text-sm text-[#d1e0d6]">Enrollment status</p><h2 className="mt-2 font-serif text-3xl">Ready when you are.</h2></div><Sparkles aria-hidden="true" className="h-5 w-5 text-[#d1e0d6]" /></div><div className="mt-7 flex items-end justify-between border-t border-[#aac1b5]/25 pt-5"><span className="text-sm text-[#d1e0d6]">One-time enrollment</span><span className="font-serif text-2xl">{formatMoney(data.enrollmentFeeCents)}</span></div><p className="mt-4 text-xs leading-5 text-[#d1e0d6]">Demo event recorded · no live charge · nonrefundable demo terms</p></CardContent></Card>
+        <Card className="border-[#e8e2d7] bg-white/90 shadow-[0_16px_50px_rgba(67,73,63,0.06)]"><CardHeader><CardTitle className="font-serif text-2xl text-[#173d35]">Your next session</CardTitle><CardDescription className="text-[#536057]">A quick view of what is ahead.</CardDescription></CardHeader><CardContent>{nextSession ? <div className="rounded-2xl bg-[#faf7f0] p-5"><div className="flex items-center gap-3 text-[#315d49]"><CalendarDays aria-hidden="true" className="h-5 w-5" /><span className="text-sm font-semibold">{nextSession.status === "confirmed" ? "Confirmed" : "Request received"}</span></div><p className="mt-4 font-serif text-2xl text-[#173d35]">{formatSessionTime(nextSession.startsAt, nextSession.timeZone)}</p><p className="mt-2 text-sm text-[#536057]">{formatDuration(nextSession.units)} of listening time</p></div> : <div className="rounded-2xl border border-dashed border-[#c8c4b9] p-5 text-sm leading-6 text-[#536057]">No upcoming sessions yet. When you’re ready, choose a time to begin.</div>}<div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-[#f7f4ed] p-3"><p className="text-xs text-[#536057]">Upcoming</p><p className="mt-1 text-xl font-semibold text-[#173d35]">{upcoming.length}</p></div><div className="rounded-xl bg-[#f7f4ed] p-3"><p className="text-xs text-[#536057]">Completed</p><p className="mt-1 text-xl font-semibold text-[#173d35]">{completedSessionCount}</p></div></div></CardContent></Card>
+      </div>
+      <Card className="border-[#e8e2d7] bg-white/95 shadow-[0_20px_60px_rgba(67,73,63,0.06)]"><CardHeader className="border-b border-[#eee9df] pb-5"><CardTitle className="font-serif text-3xl text-[#173d35]">Reserve a listening session</CardTitle><CardDescription className="mt-2 max-w-lg leading-6 text-[#536057]">Choose one to four 30-minute units. One request may be made in each rolling 12-hour period.</CardDescription></CardHeader>
+        <CardContent className="space-y-5 pt-6">
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2"><Label htmlFor="session-date" className="text-[#34483e]">Start time <span className="text-[#536057]">({timeZone})</span></Label><Input id="session-date" type="datetime-local" min={nextLocalSlot()} step={1800} value={startLocal} onChange={(event) => updateDate(event.target.value)} aria-describedby="session-time-help" aria-invalid={Boolean(startsAt && startsAt.getTime() < Date.now())} className="min-h-12 rounded-xl border-[#ded8cd] bg-[#fcfaf6] text-[#34483e] focus-visible:ring-[#739b86]" /><p id="session-time-help" role={availability.isError || availability.data?.timeZoneValid === false ? "alert" : "status"} aria-live={availability.isError || availability.data?.timeZoneValid === false ? "assertive" : "polite"} className={`min-h-10 text-xs leading-5 ${availability.isError || availability.data?.conflict || availability.data?.withinWindow ? "text-[#8a5d46]" : "text-[#315d49]"}`}>{availabilityMessage}</p>{availability.isError ? <Button type="button" variant="outline" size="sm" onClick={() => availability.refetch()} className="min-h-10 border-[#bdc9c0] text-[#34483e]">Retry availability check</Button> : null}</div>
+            <div className="space-y-2"><Label htmlFor="session-units" className="text-[#34483e]">Session length</Label><select id="session-units" value={units} onChange={(event) => { setUnits(Number(event.target.value)); resetConfirmation(); }} className="min-h-12 w-full rounded-xl border border-[#ded8cd] bg-[#fcfaf6] px-3 text-sm text-[#34483e] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#587365]">{[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value} unit{value > 1 ? "s" : ""} · {formatDuration(value)}</option>)}</select><p className="text-xs leading-5 text-[#536057]">Maximum 4 units (2 hours) per request.</p></div>
+          </div>
+          <div className="rounded-2xl bg-[#faf7f0] p-4 sm:p-5"><div className="flex justify-between gap-4 text-sm text-[#46564d]"><span>Listening time · {formatMoney(UNIT_PRICE_CENTS)} × {units}</span><span>{formatMoney(units * UNIT_PRICE_CENTS)}</span></div><div className="mt-2 flex justify-between gap-4 text-sm text-[#46564d]"><span>Per-30-minute-block fee · {formatMoney(UNIT_FEE_CENTS)} × {units}</span><span>{formatMoney(units * UNIT_FEE_CENTS)}</span></div><div className="mt-3 flex justify-between gap-4 border-t border-[#e8e2d7] pt-3 font-semibold text-[#173d35]"><span>Demo payment total</span><span>{formatMoney(amountCents)}</span></div><p className="mt-2 text-xs leading-5 text-[#536057]">Sandbox simulation only—no live card is charged or saved. Provider processing fees may vary in a future live service. Demo transactions are final and nonrefundable.</p></div>
+          {bookingLocked ? <div className="flex items-start gap-3 rounded-2xl bg-[#fff4ed] p-4 text-sm leading-6 text-[#774b35]" role="status"><Clock3 aria-hidden="true" className="mt-1 h-4 w-4 shrink-0" /><p>Your rolling booking window is active. A cancelled request still counts toward the 12-hour limit; the next request is allowed after {unlockLabel}.</p></div> : null}
+          {paymentConfirmed ? <div className="space-y-3" aria-live="polite"><div className="rounded-xl border border-[#b5d1c0] bg-[#edf5ef] px-4 py-3 text-sm text-[#315d49]"><p className="font-semibold">Simulated payment confirmed · {formatMoney(amountCents)}</p><p className="mt-1">{startsAt ? formatSessionTime(startsAt.toISOString(), timeZone) : "Choose a valid time"} · {formatDuration(units)} · no live payment occurred.</p></div><div className="grid gap-2 sm:grid-cols-2"><Button type="button" onClick={() => { setPaymentConfirmed(false); }} disabled={booking.isPending} variant="outline" className="min-h-12 border-[#bdc9c0] text-[#34483e]">Change selection</Button><Button type="button" onClick={() => booking.mutate({ startsAt: startsAtIso, localStart, timeZone, units, demoPaymentConfirmed: true, idempotencyKey })} disabled={booking.isPending || !canConfirmDemoPayment} className="min-h-12 rounded-xl bg-[#173d35] text-white hover:bg-[#28574b]">{booking.isPending ? "Submitting request…" : "Submit booking request"}</Button></div>{booking.isError ? <p role="alert" className="text-sm text-[#8a5d46]">{booking.error.message} Retry safely or change the slot.</p> : null}</div> : <Button type="button" onClick={() => { if (!canConfirmDemoPayment) return; setPaymentConfirmed(true); toast.success("Simulation confirmed. Your booking request has not been submitted yet."); }} disabled={!canConfirmDemoPayment} className="min-h-12 w-full rounded-xl bg-[#8a5d46] text-white shadow-[0_10px_22px_rgba(138,93,70,0.18)] hover:bg-[#815b45]">Confirm simulated payment · {formatMoney(amountCents)}</Button>}
+          <p className="text-xs text-[#58645b]">Confirming the simulation does not create a booking. Submit the request in the next step to reserve the slot.</p>
+        </CardContent>
+      </Card>
+    </div>
 
-  return <main className="mx-auto w-full max-w-6xl flex-1 px-5 pb-16 sm:px-8"><div className="flex flex-col gap-6 border-b border-[#e6e0d5] pb-8 pt-5 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#9a7257]">Your private space</p><h1 className="mt-3 font-serif text-5xl tracking-tight text-[#173d35]">Welcome back.</h1><p className="mt-3 text-[#68716b]">A little room to check in, reserve time, and arrive as you are.</p></div><Badge className="w-fit border-[#cfe1d5] bg-[#f0f6f1] px-3 py-1.5 text-[#3c6b5b]">Enrollment active</Badge></div><div className="grid gap-6 pt-8 lg:grid-cols-[0.8fr_1.2fr]"><div className="space-y-6"><Card className="border-[#e8e2d7] bg-[#173d35] text-[#f6f1e8] shadow-[0_20px_60px_rgba(23,61,53,0.14)]"><CardContent className="p-7"><div className="flex items-start justify-between"><div><p className="text-sm text-[#bad0c2]">Enrollment status</p><h2 className="mt-2 font-serif text-3xl">Ready when you are.</h2></div><Sparkles className="h-5 w-5 text-[#b8d6c5]" /></div><div className="mt-8 flex items-end justify-between border-t border-[#aac1b5]/20 pt-5"><span className="text-sm text-[#bad0c2]">One-time enrollment</span><span className="font-serif text-2xl">$9.99</span></div><p className="mt-4 text-xs leading-5 text-[#bad0c2]">Demo-only • Nonrefundable enrollment fee</p></CardContent></Card><Card className="border-[#e8e2d7] bg-white/75 shadow-[0_16px_50px_rgba(67,73,63,0.06)]"><CardHeader><CardTitle className="font-serif text-2xl text-[#173d35]">Your next session</CardTitle><CardDescription>Keep this time just for you.</CardDescription></CardHeader><CardContent>{nextReservation ? <div className="rounded-2xl bg-[#faf7f0] p-5"><div className="flex items-center gap-3 text-[#4e866f]"><CalendarDays className="h-5 w-5" /><span className="text-sm font-semibold">{nextReservation.status === "confirmed" ? "Confirmed" : "Request received"}</span></div><p className="mt-4 font-serif text-2xl text-[#173d35]">{formatSessionTime(nextReservation.startsAt)}</p><p className="mt-2 text-sm text-[#768078]">{formatDuration(nextReservation.units)} of quiet listening time</p></div> : <div className="rounded-2xl border border-dashed border-[#d8d2c6] p-5 text-sm leading-6 text-[#768078]">No sessions reserved yet. When you’re ready, choose a time to begin.</div>}</CardContent></Card></div><Card className="border-[#e8e2d7] bg-white/80 shadow-[0_20px_60px_rgba(67,73,63,0.06)]"><CardHeader className="border-b border-[#eee9df] pb-5"><div className="flex items-start justify-between"><div><CardTitle className="font-serif text-3xl text-[#173d35]">Reserve a listening session</CardTitle><CardDescription className="mt-2 max-w-lg leading-6">Choose one to four 30-minute units. One reservation is allowed in each rolling 12-hour period.</CardDescription></div><UsersRound className="hidden h-6 w-6 text-[#9a7257] sm:block" /></div></CardHeader><CardContent className="space-y-6 pt-6"><div className="grid gap-5 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="session-date" className="text-[#46564d]">Start time</Label><Input id="session-date" type="datetime-local" value={date} onChange={(event) => { setDate(event.target.value); setPaidConfirmed(false); }} className="h-12 rounded-xl border-[#ded8cd] bg-[#fcfaf6] focus-visible:ring-[#739b86]" /><p className={`text-xs ${availability.data?.conflict ? "text-[#9a7257]" : "text-[#6b8b79]"}`}>{availability.isLoading ? "Checking availability…" : availability.data?.conflict ? "Unavailable · overlaps a reservation" : selectedStart.getTime() <= Date.now() ? "Choose a future time" : "Available · checked against all reservations"}</p></div><div className="space-y-2"><Label htmlFor="session-units" className="text-[#46564d]">Session length</Label><select id="session-units" value={units} onChange={(event) => { setUnits(Number(event.target.value)); setPaidConfirmed(false); }} className="h-12 w-full rounded-xl border border-[#ded8cd] bg-[#fcfaf6] px-3 text-sm text-[#34483e] outline-none focus:ring-2 focus:ring-[#739b86]">{[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value} unit{value > 1 ? "s" : ""} · {formatDuration(value)}</option>)}</select></div></div><div className="rounded-2xl bg-[#faf7f0] p-4"><div className="flex justify-between text-sm text-[#68716b]"><span>Listening time · ${"9.30"} × {units}</span><span>${(priceCents / 100).toFixed(2)}</span></div><div className="mt-2 flex justify-between text-sm text-[#68716b]"><span>Per-30-minute-block fee · $1.00 × {units}</span><span>${(feesCents / 100).toFixed(2)}</span></div><div className="mt-3 flex justify-between border-t border-[#e8e2d7] pt-3 font-semibold text-[#173d35]"><span>Demo payment total</span><span>${(totalCents / 100).toFixed(2)}</span></div><p className="mt-2 text-xs leading-5 text-[#929990]">Sandbox confirmation only; no live card is charged. Processing fees in a live service may vary. Demo transactions are final and nonrefundable.</p></div><div className={`flex items-start gap-3 rounded-2xl p-4 text-sm leading-6 ${bookingLocked ? "bg-[#fff4ed] text-[#8a5d46]" : "bg-[#f0f6f1] text-[#587365]"}`}><Clock3 className="mt-1 h-4 w-4 shrink-0" /><p>{bookingLocked ? "A reservation was made within the last 12 hours. The next booking unlocks automatically when the rolling window expires." : "Your requested interval is checked against every active reservation, including overlapping multi-unit bookings."}</p></div>{!paidConfirmed ? <Button onClick={() => { if (bookingLocked) { toast.error("You already have a reservation within the 12-hour window."); return; } if (!availability.data?.available) { toast.error(availability.data?.conflict ? "That session time overlaps a reservation." : "Choose an available future time."); return; } setPaidConfirmed(true); toast.success(`Sandbox payment confirmed: $${(totalCents / 100).toFixed(2)}. This demo payment is final.`); }} disabled={availability.isLoading || availability.isError || bookingLocked || !availability.data?.available} className="h-12 w-full rounded-xl bg-[#9a7257] text-white shadow-[0_10px_22px_rgba(154,114,87,0.18)] hover:bg-[#815b45]">Confirm sandbox payment · ${(totalCents / 100).toFixed(2)}</Button> : <div className="space-y-3"><div className="rounded-xl border border-[#cfe1d5] bg-[#f0f6f1] px-4 py-3 text-sm text-[#3c6b5b]">Demo payment confirmed. This transaction is final and nonrefundable.</div><Button onClick={book} disabled={booking.isPending || bookingLocked} className="h-12 w-full rounded-xl bg-[#173d35] text-white hover:bg-[#28574b]">{booking.isPending ? "Submitting booking request…" : `Submit booking request · ${formatDuration(units)}`}</Button></div>}</CardContent></Card></div><section className="mt-10"><div className="mb-4 flex items-center justify-between"><div><p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#9a7257]">Reservation history</p><h2 className="mt-2 font-serif text-3xl text-[#173d35]">Upcoming sessions</h2></div><span className="text-sm text-[#929990]">{futureReservations.length} reserved</span></div>{futureReservations.length ? <div className="space-y-3">{futureReservations.map((reservation) => <div key={reservation.id} className="flex flex-col gap-3 rounded-2xl border border-[#e8e2d7] bg-white/70 p-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-4"><div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#f5eee7] text-[#9a7257]"><CalendarDays className="h-5 w-5" /></div><div><p className="font-medium text-[#34483e]">{formatSessionTime(reservation.startsAt)}</p><p className="mt-1 text-sm text-[#8a9289]">{formatDuration(reservation.units)} • ${((reservation.amountCents ?? 0) / 100).toFixed(2)} demo payment · final</p></div></div><Badge className={`w-fit ${reservation.status === "confirmed" ? "border-[#cfe1d5] bg-[#f0f6f1] text-[#3c6b5b]" : "border-[#ead8c8] bg-[#fcf4ed] text-[#9a7257]"}`}>{reservation.status === "confirmed" ? "Confirmed" : "Requested"}</Badge></div>)}</div> : <div className="rounded-2xl border border-dashed border-[#d8d2c6] bg-white/50 p-8 text-center text-sm text-[#768078]">Your upcoming reservations will appear here.</div>}</section></main>;
+    <section aria-labelledby="sessions-heading" className="mt-10">
+      <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#825c43]">Your schedule</p><h2 id="sessions-heading" className="mt-2 font-serif text-3xl text-[#173d35]">Sessions</h2></div><p className="text-sm text-[#536057]" aria-live="polite">{upcoming.length} upcoming · {reservations.length} total records</p></div>
+      <SessionHistory reservations={visibleSessions} onCancel={setCancelReservation} />
+    </section>
+
+    <AlertDialog open={Boolean(cancelReservation)} onOpenChange={(open) => { if (!open && !cancellation.isPending) setCancelReservation(null); }}>
+      <AlertDialogContent className="border-[#e6e0d5] bg-[#fffdfa] text-[#173d35]">
+        <AlertDialogHeader><AlertDialogTitle className="font-serif text-2xl">Cancel this session?</AlertDialogTitle><AlertDialogDescription className="text-[#536057]">{cancelReservation ? `${formatSessionTime(cancelReservation.startsAt, cancelReservation.timeZone)} · ${formatDuration(cancelReservation.units)}.` : ""} This frees the time for other clients, but your 12-hour booking limit still applies. The demo fee is not a live charge.</AlertDialogDescription></AlertDialogHeader>
+        <AlertDialogFooter><AlertDialogCancel disabled={cancellation.isPending} className="min-h-11 border-[#bdc9c0]">Keep session</AlertDialogCancel><AlertDialogAction disabled={cancellation.isPending || !cancelReservation} onClick={(event) => { event.preventDefault(); if (cancelReservation) cancellation.mutate({ reservationId: cancelReservation.id }); }} className="min-h-11 bg-[#8a5d46] text-white hover:bg-[#774b35]">{cancellation.isPending ? "Cancelling…" : "Confirm cancellation"}</AlertDialogAction></AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  </>;
+}
+
+function SessionHistory({ reservations, onCancel }: { reservations: Reservation[]; onCancel: (reservation: Reservation) => void }) {
+  const [filter, setFilter] = useState<HistoryFilter>("upcoming");
+  const now = Date.now();
+  const filtered = reservations.filter((reservation) => {
+    const isUpcoming = (reservation.status === "requested" || reservation.status === "confirmed") && new Date(reservation.startsAt).getTime() >= now;
+    if (filter === "upcoming") return isUpcoming;
+    if (filter === "past") return !isUpcoming;
+    return true;
+  });
+  return <Card className="border-[#e8e2d7] bg-white/90 shadow-[0_16px_45px_rgba(67,73,63,0.05)]"><CardContent className="p-4 sm:p-6"><div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="Filter session history">{(["upcoming", "past", "all"] as const).map((value) => <Button key={value} type="button" size="sm" variant={filter === value ? "secondary" : "outline"} aria-pressed={filter === value} onClick={() => setFilter(value)} className={filter === value ? "min-h-10 bg-[#edf5ef] text-[#315d49]" : "min-h-10 border-[#d8d2c6] text-[#46564d]"}>{value === "upcoming" ? "Upcoming" : value === "past" ? "Past / cancelled" : "All sessions"}</Button>)}</div>
+    {filtered.length ? <ul className="space-y-3">{filtered.map((reservation) => <li key={reservation.id} className="flex flex-col gap-4 rounded-2xl border border-[#e8e2d7] bg-[#fffdfa] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"><div className="flex min-w-0 items-start gap-4"><span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#f5eee7] text-[#825c43]"><CalendarDays className="h-5 w-5" /></span><div className="min-w-0"><p className="font-medium text-[#34483e]">{formatSessionTime(reservation.startsAt, reservation.timeZone)}</p><p className="mt-1 text-sm text-[#536057]">{formatDuration(reservation.units)} · {formatMoney(reservation.amountCents)} simulated demo payment</p><p className="mt-1 text-xs text-[#58645b]">Requested {new Date(reservation.createdAt).toLocaleString()}</p></div></div><div className="flex flex-wrap items-center gap-2 sm:justify-end"><Badge className={reservation.status === "confirmed" ? "border-[#b5d1c0] bg-[#edf5ef] text-[#315d49]" : reservation.status === "cancelled" ? "border-[#e4c6b2] bg-[#fff4ed] text-[#774b35]" : reservation.status === "completed" ? "border-[#ccd3d9] bg-[#f0f3f5] text-[#445a66]" : "border-[#e0d5c9] bg-[#f7f1eb] text-[#714e3a]"}>{reservation.status === "requested" ? "Request received" : reservation.status}</Badge>{(reservation.status === "requested" || reservation.status === "confirmed") && new Date(reservation.startsAt).getTime() > Date.now() ? <Button type="button" variant="outline" size="sm" onClick={() => onCancel(reservation)} className="min-h-10 border-[#d9bba7] text-[#774b35] hover:bg-[#fff4ed]"><X aria-hidden="true" className="h-4 w-4" /><span>Cancel</span></Button> : null}</div></li>)}</ul> : <div className="rounded-2xl border border-dashed border-[#c8c4b9] p-9 text-center"><CalendarDays aria-hidden="true" className="mx-auto h-6 w-6 text-[#825c43]" /><p className="mt-3 font-medium text-[#34483e]">{filter === "upcoming" ? "No upcoming sessions" : "No sessions in this view"}</p><p className="mt-1 text-sm text-[#536057]">Your session requests and updates will appear here.</p></div>}
+  </CardContent></Card>;
 }
 
 export default function Home() {
-  const { user, logout, isAuthenticated, loading } = useAuth();
-  const dashboard = trpc.stillpoint.profile.dashboard.useQuery(undefined, { enabled: isAuthenticated, retry: false });
-  const hasEnrollment = Boolean(dashboard.data?.enrolled);
-  const resolvingEnrollment = isAuthenticated && dashboard.isLoading;
-  const enrollmentError = isAuthenticated && dashboard.isError;
-  return <div className="min-h-screen bg-[#f7f4ed] text-[#173d35]"><TopBar onSignOut={logout} isAuthenticated={isAuthenticated} />{loading || resolvingEnrollment ? <main className="mx-auto flex w-full max-w-6xl flex-1 items-center justify-center px-5 py-24 text-[#768078]">Loading your private space…</main> : enrollmentError ? <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-24 text-center text-[#8a5d46]">Your profile could not be loaded. Please refresh and try again.</main> : isAuthenticated && hasEnrollment ? <Dashboard /> : <Onboarding isAuthenticated={isAuthenticated} />}<footer className="mx-auto flex w-full max-w-6xl flex-col gap-2 border-t border-[#e6e0d5] px-5 py-6 text-xs leading-5 text-[#929990] sm:flex-row sm:items-center sm:justify-between sm:px-8"><span>Stillpoint · empathetic listening prototype</span><span>{user?.email ? `Signed in as ${user.email}` : "Demo access · no live payment processing"}</span></footer></div>;
+  const { user, logout, isAuthenticated, loading, error } = useAuth();
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const dashboard = trpc.stillpoint.profile.dashboard.useQuery(undefined, { enabled: isAuthenticated, retry: false, refetchOnWindowFocus: true });
+  const utils = trpc.useUtils();
+  const signOut = useCallback(async () => {
+    setIsSigningOut(true);
+    try { await logout(); } catch (cause) { toast.error(cause instanceof Error ? cause.message : "Could not sign out. Please try again."); }
+    finally { setIsSigningOut(false); }
+  }, [logout]);
+  if (loading) return <StillpointShell variant="client" isAuthenticated={false} isAdmin={false}><main id="main-content" tabIndex={-1} className="mx-auto flex min-h-[40vh] w-full max-w-6xl flex-1 items-center justify-center px-4 text-[#536057]" role="status">Checking your private space…</main></StillpointShell>;
+  if (error && !isAuthenticated) return <StillpointShell isAuthenticated={false} isAdmin={false}><main id="main-content" tabIndex={-1} className="mx-auto flex min-h-[45vh] w-full max-w-6xl flex-1 flex-col items-center justify-center gap-3 px-4 text-center"><h1 className="font-serif text-3xl text-[#173d35]">Sign-in could not be checked</h1><p role="alert" className="max-w-md text-sm text-[#774b35]">Please retry. Your private data is not shown until the session is verified.</p><Button type="button" variant="outline" onClick={() => utils.auth.me.invalidate()} className="min-h-11 border-[#bdc9c0]">Retry sign-in check</Button></main></StillpointShell>;
+  const common = { isAuthenticated, isAdmin: user?.role === "admin", isSigningOut, userName: user?.name, userEmail: user?.email, onSignOut: signOut };
+  if (isAuthenticated && dashboard.isLoading) return <StillpointShell {...common}><main id="main-content" tabIndex={-1} className="mx-auto flex min-h-[45vh] w-full max-w-6xl flex-1 items-center justify-center px-4 text-[#536057]" role="status">Opening your private dashboard…</main></StillpointShell>;
+  if (isAuthenticated && dashboard.isError) return <StillpointShell {...common}><main id="main-content" tabIndex={-1} className="mx-auto flex min-h-[45vh] w-full max-w-6xl flex-1 flex-col items-center justify-center gap-3 px-4 text-center"><h1 className="font-serif text-3xl text-[#173d35]">Your dashboard could not be loaded</h1><p role="alert" className="max-w-lg text-sm text-[#774b35]">{dashboard.error.message || "Your profile is unchanged. Try reloading the dashboard."}</p><Button type="button" onClick={() => dashboard.refetch()} disabled={dashboard.isFetching} className="min-h-11 bg-[#173d35]">{dashboard.isFetching ? "Retrying…" : "Retry dashboard"}</Button></main></StillpointShell>;
+  const enrolled = Boolean(dashboard.data?.enrolled);
+  return <StillpointShell {...common}>
+    {isAuthenticated && enrolled && dashboard.data ? <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-6xl flex-1 px-4 pb-14 sm:px-8"><div className="flex flex-col gap-5 border-b border-[#e6e0d5] pb-7 pt-5 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#825c43]">Your private space</p><h1 className="mt-3 font-serif text-4xl tracking-tight text-[#173d35] sm:text-5xl">Welcome back{user?.name ? `, ${user.name.split(" ")[0]}` : ""}.</h1><p className="mt-3 max-w-xl text-[#46564d]">A little room to check in, reserve time, and arrive as you are.</p></div><Badge className="w-fit border-[#b5d1c0] bg-[#edf5ef] px-3 py-1.5 text-[#315d49]">Enrollment active</Badge></div><BookingCard data={dashboard.data} reservations={dashboard.data.reservations} onRefresh={() => dashboard.refetch()} /></main> : <Onboarding isAuthenticated={isAuthenticated} />}
+  </StillpointShell>;
 }
