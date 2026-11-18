@@ -24,7 +24,7 @@ type StillpointShellProps = {
 };
 
 function BrandMark() {
-  return <Link href="/" aria-label="Stillpoint home" className="inline-flex min-w-0 items-center gap-3 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#587365] focus-visible:ring-offset-2">
+  return <Link href="/" className="inline-flex min-w-0 items-center gap-3 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#587365] focus-visible:ring-offset-2">
     <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#173d35] text-[#f6f1e8] shadow-[0_8px_24px_rgba(23,61,53,0.18)]"><HeartHandshake className="h-5 w-5" strokeWidth={1.8} /></span>
     <span className="min-w-0"><span className="block truncate font-serif text-lg font-semibold leading-none tracking-tight text-[#173d35]">Stillpoint</span><span className="mt-1 block truncate text-[10px] font-medium uppercase tracking-[0.22em] text-[#69726a]">Empathetic listening</span></span>
   </Link>;
